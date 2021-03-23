@@ -1,8 +1,11 @@
 // Package workerpool provides a workerpool. It also can expand and shrink dynamically.
 //
-// Jobs can be queued using the Queue() method which also accepts a timeout parameter for timing out queuing and if all workers are too busy.
+// Jobs can be queued using the Queue() method which also accepts a timeout parameter for
+// timing out queuing and if all workers are too busy.
 //
-// For expanding the queue, Expand() method can be used, which increases the number of workers. If a timeout is provided, these extra workers will stop, if there are not enough jobs to do. It is also possible to explicitly stop extra workers by providing a quit channel.
+// For expanding the queue, Expand() method can be used, which increases the number of workers.
+// If a timeout is provided, these extra workers will stop, if there are not enough jobs to do.
+// It is also possible to explicitly stop extra workers by providing a quit channel.
 package workerpool
 
 import (
@@ -26,21 +29,20 @@ type WorkerPool struct {
 }
 
 // New makes a new *WorkerPool.
-func New(workers int, jobQueue ...int) *WorkerPool {
-	q := 0
-	if len(jobQueue) > 0 && jobQueue[0] > 0 {
-		q = jobQueue[0]
+func New(workerCount, jobQueueSize int) *WorkerPool {
+	if jobQueueSize < 0 {
+		jobQueueSize = 0
 	}
-	if workers < 0 {
-		workers = runtime.NumCPU()
+	if workerCount < 0 {
+		workerCount = runtime.NumCPU()
 	}
 	pool := WorkerPool{
-		pool: make(chan chan func(), workers),
-		jobs: make(chan func(), q),
+		pool: make(chan chan func(), workerCount),
+		jobs: make(chan func(), jobQueueSize),
 		quit: make(chan struct{}),
 		wg:   sync.WaitGroup{},
 	}
-	for i := 0; i < workers; i++ {
+	for i := 0; i < workerCount; i++ {
 		var builder workerBuilder
 		w := builder.
 			withPool(pool.pool).
@@ -55,13 +57,13 @@ func New(workers int, jobQueue ...int) *WorkerPool {
 }
 
 // Queue queues a job to be run by a worker.
-func (pool *WorkerPool) Queue(job func(), timeout ...time.Duration) bool {
+func (pool *WorkerPool) Queue(job func(), timeout time.Duration) bool {
 	if pool.stopped() {
 		return false
 	}
 	var t <-chan time.Time
-	if len(timeout) > 0 && timeout[0] > 0 {
-		t = time.After(timeout[0])
+	if timeout > 0 {
+		t = time.After(timeout)
 	}
 	select {
 	case pool.jobs <- job:
@@ -81,7 +83,7 @@ func (pool *WorkerPool) Stop() {
 
 // Expand is for putting more 'Worker's into work. If there is'nt any job to do,
 // and a timeout is set, they will simply get timed-out.
-// Default behaviour is they will timeout in a sliding manner.
+// Default behavior is they will timeout in a sliding manner.
 // A quit channel can be used too, to explicitly stop extra workers.
 //
 // One firend noted that there might be a *temporary* goroutine leak, when expanding
@@ -125,7 +127,7 @@ func (pool *WorkerPool) dispatch() {
 	for {
 		select {
 		case job := <-pool.jobs:
-			//handle job
+			// handle job
 			todo := <-pool.pool
 			todo <- job
 		case <-pool.quit:
@@ -190,8 +192,8 @@ func (w *worker) registerInPool(timeout <-chan time.Time) (ok bool) {
 	case w.pool <- w.todo:
 		return true
 	case <-timeout:
-		//failed to register; means WorkerPool is full == there are
-		//enough workers with not enough work!
+		// failed to register; means WorkerPool is full == there are
+		// enough workers with not enough work!
 		return false
 	case <-w.quit:
 		return false
